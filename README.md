@@ -1,5 +1,3 @@
-### Welcome! This repository serves as a curated collection of security detections and content I've developed.
-
 ## Platforms
 
 * **CrowdStrike Falcon:** Indicators of Attack (IOA), NG-SIEM dashboards, and CrowdStrike Query Language (CQL) queries developed for detections, host management metrics, and platform automation.
