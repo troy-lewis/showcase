@@ -1,0 +1,7 @@
+// This rule detects when Windows Remote Management is manually enabled through the service control utility.
+
+TYPE
+Process Execution
+
+COMMAND LINE
+.*sc.*start\swinrm.*|(winrs\s+(\-r|\/r))|(cscript.*?nologo.*?\\winrm\.vbs\"\s+(invoke|i))
