@@ -1,0 +1,9 @@
+// This rule looks for binaries added to the Run key that reference certain directories often used by malware.
+
+TYPE
+Process Execution
+
+COMMAND LINE
+.*CurrentVersion\\Run.*|.*C:\\.*|.*C:\\.*CurrentVersion\\Run.*
+    EXCLUDE
+    .*Appdata.*|.*temp.*|.*programdata.*|.*system32.*|.*program.*|.*files.*|.*windows.*|.*\.cmd.*|.*\.pem
