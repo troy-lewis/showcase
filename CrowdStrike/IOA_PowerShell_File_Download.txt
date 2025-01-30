@@ -1,0 +1,13 @@
+// This alert detects a file downloaded using PowerShell.
+
+TYPE
+Process Creation
+
+IMAGE FILENAME
+.*powershell\.exe.*
+
+COMMAND LINE
+.*(iwr\s|\siwr\s|wget\s*|\swget\s|curl\s|\scurl\s|Invoke-RestMethod\s|Start-BitsTransfer\s|WebClient\s|HttpClient\s|\.DownloadFile|\-BitsTransfer|WebClient(\)\.|\.)downloadstring\().*
+
+    EXCLUDE
+    .*(169\.254\.169\.254|chocolatey\.org|slackb\.com|aka\.ms|fd00:ec2\:\:254).*
