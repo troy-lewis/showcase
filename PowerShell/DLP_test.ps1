@@ -1,94 +1,61 @@
-# --- CONFIG ---
-$FormUrl        = "https://dlptest.com/http-post/"
-$TextFieldName  = "data"
-$UserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShell-DLPTest/1.0"
+$uri = "https://dlptest.com/http-post/"
+$testData = @"
+John Doe
+SSN: 660-03-8360
+Card: 4111 1111 1111 1111
+"@
 
-# Optional: strings that indicate "blocked" or "triggered" in the response HTML
-$TriggerIndicators = @(
-  "blocked",
-  "denied",
-  "DLP",
-  "policy",
-  "rule triggered"
-)
-
-function Get-HiddenInputsFromHtml {
-  param([string]$Html)
-
-  $hidden = @{}
-  $pattern = '<input[^>]*type=["'']hidden["''][^>]*>'
-  [regex]::Matches($Html, $pattern) | ForEach-Object {
-    $tag = $_.Value
-    $name = [regex]::Match($tag, 'name=["'']([^"'']+)["'']').Groups[1].Value
-    $value = [regex]::Match($tag, 'value=["'']([^"'']*)["'']').Groups[1].Value
-    if ($name) { $hidden[$name] = $value }
-  }
-  return $hidden
-}
-
-# --- INPUT ---
-Write-Host "Enter the text you want to test. Finish with an empty line:" -ForegroundColor Cyan
-$lines = New-Object System.Collections.Generic.List[string]
-while ($true) {
-  $line = Read-Host
-  if ([string]::IsNullOrWhiteSpace($line)) { break }
-  $lines.Add($line)
-}
-$payloadText = ($lines -join "`n")
-
-if ([string]::IsNullOrWhiteSpace($payloadText)) {
-  Write-Host "No input provided. Exiting." -ForegroundColor Yellow
-  exit 1
-}
-
-# --- SESSION ---
+# Keep cookies/session like a browser
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
-try {
-  # 1) GET the form page (collect cookies + hidden fields)
-  Write-Host "`n[1/3] GET form page: $FormUrl" -ForegroundColor Cyan
-  $formResp = Invoke-WebRequest -Uri $FormUrl -Method GET -WebSession $session -UserAgent $UserAgent -ErrorAction Stop
+# 1) GET the page (to capture cookies + hidden fields)
+$get = Invoke-WebRequest -Uri $uri -WebSession $session -UseBasicParsing
 
-  $hiddenFields = Get-HiddenInputsFromHtml -Html $formResp.Content
-  Write-Host ("Captured {0} hidden field(s)." -f $hiddenFields.Count) -ForegroundColor Gray
+$html = $get.Content
 
-  # 2) Build POST body
-  $body = @{}
-  foreach ($k in $hiddenFields.Keys) { $body[$k] = $hiddenFields[$k] }
-  $body[$TextFieldName] = $payloadText
-  $body["submit"] = "Submit"
+# 2) Try to find the textarea name used for the "Test Message" field
+#    Fallback to "Test_Message" since the page labels it that way.
+$textareaName = $null
 
-  # 3) POST
-  Write-Host "[2/3] POST user content..." -ForegroundColor Cyan
-  $postResp = Invoke-WebRequest -Uri $FormUrl -Method POST -WebSession $session -UserAgent $UserAgent `
-    -ContentType "application/x-www-form-urlencoded" -Body $body -ErrorAction Stop
-
-  Write-Host ("HTTP Status: {0}" -f $postResp.StatusCode) -ForegroundColor Gray
-
-  # 4) Evaluate result
-  Write-Host "[3/3] Evaluating response..." -ForegroundColor Cyan
-  $html = $postResp.Content
-
-  $matched = @()
-  foreach ($indicator in $TriggerIndicators) {
-    if ($html -match [regex]::Escape($indicator)) { $matched += $indicator }
-  }
-
-  if ($matched.Count -gt 0) {
-    Write-Host "Possible trigger/block indicators found in response: $($matched -join ', ')" -ForegroundColor Yellow
-  } else {
-    Write-Host "No trigger indicators found using the current keyword list." -ForegroundColor Green
-  }
-
-  # Save response for review
-  $outFile = Join-Path $PWD "dlptest_response.html"
-  Set-Content -Path $outFile -Value $html -Encoding UTF8
-  Write-Host "Saved response HTML to: $outFile" -ForegroundColor Gray
-
-} catch {
-  Write-Host "Request failed: $($_.Exception.Message)" -ForegroundColor Red
-  if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-    Write-Host ("HTTP StatusCode: {0}" -f $_.Exception.Response.StatusCode) -ForegroundColor Red
-  }
-  exit 2
+# Look for a textarea element and grab its name=""
+if ($html -match '(?is)<textarea[^>]*name="([^"]+)"[^>]*>') {
+    $textareaName = $Matches[1]
 }
+
+if (-not $textareaName) {
+    $textareaName = "Test_Message"
+}
+
+# 3) Collect hidden inputs in the first form on the page (often used by WP form plugins)
+$body = @{}
+
+# Grab hidden inputs: <input type="hidden" name="..." value="...">
+$hiddenInputs = [regex]::Matches($html, '(?is)<input[^>]*type="hidden"[^>]*>')
+foreach ($m in $hiddenInputs) {
+    $tag = $m.Value
+    $name = $null
+    $value = ""
+
+    if ($tag -match 'name="([^"]+)"') { $name = $Matches[1] }
+    if ($tag -match 'value="([^"]*)"') { $value = $Matches[1] }
+
+    if ($name) { $body[$name] = $value }
+}
+
+# Add the actual message field
+$body[$textareaName] = $testData
+
+# If there is a simple honeypot field ("If you are human, leave this field blank."), keep it blank.
+# (If the site uses a different name, leaving it absent is typically fine.)
+# $body["your_honeypot_field_name_here"] = ""
+
+# 4) POST the form
+$post = Invoke-WebRequest -Uri $uri -Method Post -WebSession $session -UseBasicParsing `
+    -ContentType "application/x-www-form-urlencoded" -Body $body
+
+# 5) Verify: HTTP status + quick indicator text
+"HTTP Status: {0}" -f $post.StatusCode
+"Response length: {0}" -f ($post.Content.Length)
+
+# Optional: print a short snippet so you can confirm you landed on a results/response page
+$post.Content.Substring(0, [Math]::Min(600, $post.Content.Length))
